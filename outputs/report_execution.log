@@ -1,0 +1,20 @@
+2026-09-28 08:35:34,716 [INFO] repo_auditor: Validated URL: owner='nonexistent-user-12345', repo='fake-repo-xyz'
+2026-09-28 08:40:39,077 [INFO] repo_auditor: Validated URL: owner='bottlepy', repo='bottle'
+2026-09-28 08:40:40,435 [WARNING] repo_auditor: Failed to download bottle.py: File 'bottle.py' exceeds max allowed size (100000 bytes).
+2026-09-28 08:51:02,111 [INFO] repo_auditor: Validated URL: owner='bottlepy', repo='bottle'
+2026-09-28 09:03:47,987 [INFO] repo_auditor: Validated URL: owner='bottlepy', repo='bottle'
+2026-09-28 09:03:55,033 [WARNING] repo_auditor: Failed to download test/test_multipart.py: GitHub API rate limit exceeded (403). Provide GITHUB_TOKEN in .env for 5,000 requests/hour.
+2026-09-28 09:03:55,077 [WARNING] repo_auditor: Failed to download test/test_oorouting.py: GitHub API rate limit exceeded (403). Provide GITHUB_TOKEN in .env for 5,000 requests/hour.
+2026-09-28 09:03:55,113 [WARNING] repo_auditor: Failed to download test/test_outputfilter.py: GitHub API rate limit exceeded (403). Provide GITHUB_TOKEN in .env for 5,000 requests/hour.
+2026-09-28 09:03:55,148 [WARNING] repo_auditor: Failed to download test/test_plugins.py: GitHub API rate limit exceeded (403). Provide GITHUB_TOKEN in .env for 5,000 requests/hour.
+2026-09-28 09:03:55,185 [WARNING] repo_auditor: Failed to download test/test_resources.py: GitHub API rate limit exceeded (403). Provide GITHUB_TOKEN in .env for 5,000 requests/hour.
+2026-09-28 09:03:55,223 [WARNING] repo_auditor: Failed to download test/test_route.py: GitHub API rate limit exceeded (403). Provide GITHUB_TOKEN in .env for 5,000 requests/hour.
+2026-09-28 09:03:55,263 [WARNING] repo_auditor: Failed to download test/test_router.py: GitHub API rate limit exceeded (403). Provide GITHUB_TOKEN in .env for 5,000 requests/hour.
+2026-09-28 09:03:55,301 [WARNING] repo_auditor: Failed to download test/test_securecookies.py: GitHub API rate limit exceeded (403). Provide GITHUB_TOKEN in .env for 5,000 requests/hour.
+2026-09-28 09:03:55,382 [WARNING] repo_auditor: Failed to download test/test_sendfile.py: GitHub API rate limit exceeded (403). Provide GITHUB_TOKEN in .env for 5,000 requests/hour.
+2026-09-28 09:03:55,431 [WARNING] repo_auditor: Failed to download test/test_stpl.py: GitHub API rate limit exceeded (403). Provide GITHUB_TOKEN in .env for 5,000 requests/hour.
+2026-09-28 09:03:55,493 [WARNING] repo_auditor: Failed to download test/test_wsgi.py: GitHub API rate limit exceeded (403). Provide GITHUB_TOKEN in .env for 5,000 requests/hour.
+2026-09-28 09:03:55,555 [WARNING] repo_auditor: Failed to download test/tools.py: GitHub API rate limit exceeded (403). Provide GITHUB_TOKEN in .env for 5,000 requests/hour.
+2026-09-28 09:08:31,851 [INFO] repo_auditor: Validated URL: owner='bottlepy', repo='bottle'
+2026-09-28 09:14:23,911 [INFO] repo_auditor: Validated URL: owner='bottlepy', repo='bottle'
+2026-09-28 09:23:12,841 [INFO] repo_auditor: Validated URL: owner='bottlepy', repo='bottle'

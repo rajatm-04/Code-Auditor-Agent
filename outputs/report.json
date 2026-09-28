@@ -1,0 +1,85 @@
+{
+  "repository": {
+    "url": "https://github.com/bottlepy/bottle",
+    "name": "bottle",
+    "primary_language": "Python",
+    "files_analyzed": 31,
+    "source_files": 31,
+    "test_files": 29,
+    "lines_analyzed": 9278,
+    "limitations": [
+      "Static check 'ruff' was unavailable or failed: Skipped ruff linting; continuing audit with heuristic analysis.",
+      "Static check 'bandit' was unavailable or failed: Skipped bandit security scan; falling back to pattern-based secret scan.",
+      "LLM Review degraded: Gemini API returned HTTP 503: {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n"
+    ]
+  },
+  "executive_summary": "LLM review could not be completed. Deterministic metrics are retained.",
+  "findings": [],
+  "tool_events": [
+    {
+      "tool": "GitHub URL Parser",
+      "status": "success",
+      "result": "Validated owner='bottlepy', repo='bottle'",
+      "error": null,
+      "recovery": null,
+      "duration_seconds": 0.0
+    },
+    {
+      "tool": "GitHub Tree & Metadata API",
+      "status": "success",
+      "result": "Found 219 files; primary language: Python",
+      "error": null,
+      "recovery": null,
+      "duration_seconds": 1.12
+    },
+    {
+      "tool": "GitHub File Downloader",
+      "status": "success",
+      "result": "Downloaded 31 files (0 skipped/failed)",
+      "error": null,
+      "recovery": null,
+      "duration_seconds": 10.3
+    },
+    {
+      "tool": "Deterministic File Analyzer",
+      "status": "success",
+      "result": "Analyzed 31 files, 9278 lines. Found 17 TODOs, 0 potential secrets, 3 broad catches.",
+      "error": null,
+      "recovery": null,
+      "duration_seconds": 0.07
+    },
+    {
+      "tool": "ruff",
+      "status": "unavailable",
+      "result": null,
+      "error": "Binary 'ruff' is not installed or not in PATH.",
+      "recovery": "Skipped ruff linting; continuing audit with heuristic analysis.",
+      "duration_seconds": 0.01
+    },
+    {
+      "tool": "bandit",
+      "status": "unavailable",
+      "result": null,
+      "error": "Binary 'bandit' is not installed or not in PATH.",
+      "recovery": "Skipped bandit security scan; falling back to pattern-based secret scan.",
+      "duration_seconds": 0.01
+    },
+    {
+      "tool": "LLM (Gemini: gemini-3.5-flash)",
+      "status": "failed",
+      "result": null,
+      "error": "Gemini API returned HTTP 503: {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n",
+      "recovery": "Falling back to deterministic heuristic summary.",
+      "duration_seconds": 43.09
+    },
+    {
+      "tool": "Finding Validator",
+      "status": "success",
+      "result": "Validated 0 findings (0 hallucinated findings rejected).",
+      "error": null,
+      "recovery": null,
+      "duration_seconds": 0.0
+    }
+  ],
+  "timestamp": "2026-09-28T09:24:07.456953"
+}
