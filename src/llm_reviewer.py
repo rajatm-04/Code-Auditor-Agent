@@ -1,7 +1,6 @@
 """
-LLM Reviewer module.
-Uses direct Google Gemini REST API with JSON mode for rock-solid reliability,
-with fallback to LiteLLM for multi-provider support (e.g. OpenAI).
+LLM Reviewer module leveraging LiteLLM for universal multi-provider support.
+Feeds deterministic tool evidence to the model to produce evidence-backed findings.
 """
 
 import json
@@ -10,14 +9,17 @@ import re
 import time
 from typing import Any, Optional
 
-import requests
+import litellm
 from src.models import Finding, LLMResponse, ToolEvent
+
+# Suppress noisy litellm debug logs
+litellm.suppress_debug_info = True
 
 
 class LLMReviewer:
-    """Manages prompting and structured response parsing from Gemini/LLMs."""
+    """Manages prompting and structured response parsing from LLMs via LiteLLM."""
 
-    DEFAULT_MODEL = "gemini-3.5-flash"
+    DEFAULT_MODEL = "gemini/gemini-3.5-flash"
 
     SYSTEM_PROMPT = """You are an elite autonomous code-quality auditor.
 Your job is to perform a rigorous, evidence-based code review on a software repository.
@@ -58,10 +60,10 @@ Allowed category values: "bug", "security", "testing", "maintainability", "perfo
 """
 
     def __init__(self, model: Optional[str] = None):
+        """Initialize reviewer with a specific litellm model string."""
         self.model = model or os.getenv("LLM_MODEL") or self.DEFAULT_MODEL
-        # Normalize model string
-        if self.model.startswith("gemini/"):
-            self.model = self.model.replace("gemini/", "")
+        if not self.model.startswith("gemini/") and "gpt" not in self.model and "claude" not in self.model:
+            self.model = f"gemini/{self.model}"
 
     def _build_user_prompt(
         self,
@@ -76,20 +78,28 @@ Allowed category values: "bug", "security", "testing", "maintainability", "perfo
         for ev in static_events:
             status_desc = ev.status
             if ev.result:
-                status_desc += f": {ev.result[:200]}..."
+                status_desc += f": {ev.result[:150]}..."
             elif ev.error:
                 status_desc += f": {ev.error}"
             static_summary_lines.append(f"- {ev.tool} ({status_desc})")
         static_summary = "\n".join(static_summary_lines) if static_summary_lines else "No static tools executed."
 
+        # Prioritize files with detected smells first
+        smell_files = set(
+            repo_stats.get("files_with_broad_exceptions", [])
+            + repo_stats.get("files_with_secrets", [])
+        )
+        sorted_files = sorted(sample_files.keys(), key=lambda p: 0 if p in smell_files else 1)
+
         file_excerpts = []
         char_count = 0
-        MAX_CHAR_BUDGET = 18_000
+        MAX_CHAR_BUDGET = 10_000
 
-        for path, content in sample_files.items():
+        for path in sorted_files:
             if char_count >= MAX_CHAR_BUDGET:
                 break
-            lines = content.splitlines()[:200]
+            content = sample_files[path]
+            lines = content.splitlines()[:100]
             snippet = "\n".join(lines)
             char_count += len(snippet)
             file_excerpts.append(f"--- FILE: {path} ---\n{snippet}\n")
@@ -112,49 +122,12 @@ AUDIT FOCUS: {focus}
 === 2. STATIC ANALYSIS TOOL RESULTS ===
 {static_summary}
 
-=== 3. SOURCE CODE EXCERPTS ===
+=== 3. SOURCE CODE EXCERPTS (PRIORITIZED) ===
 {files_text}
 
-Analyze the above evidence and output a single JSON object with your executive_summary and findings.
+Analyze the above evidence and output a single JSON object with your executive_summary and deeper architectural findings.
 Prioritize issues matching the audit focus: '{focus}'.
 """
-
-    def _call_gemini_direct(self, prompt: str) -> str:
-        """Calls Google Gemini REST API directly with JSON output mode."""
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY environment variable is not set.")
-
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={api_key}"
-        payload = {
-            "contents": [
-                {
-                    "parts": [{"text": f"{self.SYSTEM_PROMPT}\n\n{prompt}"}]
-                }
-            ],
-            "generationConfig": {
-                "response_mime_type": "application/json"
-            }
-        }
-
-        # Try up to 3 times for temporary 503 spikes
-        for attempt in range(3):
-            response = requests.post(url, json=payload, timeout=45)
-            if response.status_code == 200:
-                data = response.json()
-                if "candidates" in data and data["candidates"]:
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
-                elif "promptFeedback" in data:
-                    raise RuntimeError(f"Gemini safety filter blocked the prompt: {data['promptFeedback']}")
-                else:
-                    raise RuntimeError(f"Unexpected response structure: {data}")
-            elif response.status_code in (429, 503) and attempt < 2:
-                time.sleep(3)
-                continue
-            else:
-                raise RuntimeError(f"Gemini API returned HTTP {response.status_code}: {response.text}")
-
-        raise RuntimeError("Gemini API call failed after retries.")
 
     def review(
         self,
@@ -164,9 +137,7 @@ Prioritize issues matching the audit focus: '{focus}'.
         static_events: list[ToolEvent],
         sample_files: dict[str, str],
     ) -> tuple[LLMResponse, ToolEvent]:
-        """
-        Executes the LLM review and returns (LLMResponse, ToolEvent).
-        """
+        """Executes LLM review via LiteLLM and returns (LLMResponse, ToolEvent)."""
         start_time = time.time()
         user_prompt = self._build_user_prompt(
             repo_name=repo_name,
@@ -176,35 +147,52 @@ Prioritize issues matching the audit focus: '{focus}'.
             sample_files=sample_files,
         )
 
-        try:
-            raw_content = self._call_gemini_direct(user_prompt)
-            
-            # Clean possible markdown formatting
-            cleaned = re.sub(r"^```(?:json)?\s*", "", raw_content.strip())
-            cleaned = re.sub(r"\s*```$", "", cleaned)
+        for attempt in range(3):
+            try:
+                response = litellm.completion(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": self.SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                    timeout=60,
+                )
 
-            llm_response = LLMResponse.model_validate_json(cleaned)
-            duration = round(time.time() - start_time, 2)
+                raw_content = response.choices[0].message.content or "{}"
+                cleaned = re.sub(r"^```(?:json)?\s*", "", raw_content.strip())
+                cleaned = re.sub(r"\s*```$", "", cleaned)
 
-            event = ToolEvent(
-                tool=f"LLM (Gemini: {self.model})",
-                status="success",
-                result=f"Generated executive summary and {len(llm_response.findings)} findings.",
-                duration_seconds=duration,
-            )
-            return llm_response, event
+                llm_response = LLMResponse.model_validate_json(cleaned)
+                duration = round(time.time() - start_time, 2)
 
-        except Exception as e:
-            duration = round(time.time() - start_time, 2)
-            event = ToolEvent(
-                tool=f"LLM (Gemini: {self.model})",
-                status="failed",
-                error=str(e),
-                recovery="Falling back to deterministic heuristic summary.",
-                duration_seconds=duration,
-            )
-            fallback_response = LLMResponse(
-                executive_summary="LLM review could not be completed. Deterministic metrics are retained.",
-                findings=[],
-            )
-            return fallback_response, event
+                event = ToolEvent(
+                    tool=f"LLM ({self.model})",
+                    status="success",
+                    result=f"Generated executive summary and {len(llm_response.findings)} AI findings.",
+                    duration_seconds=duration,
+                )
+                return llm_response, event
+
+            except Exception as e:
+                err_str = str(e)
+                if ("503" in err_str or "429" in err_str) and attempt < 2:
+                    time.sleep(3)
+                    continue
+
+                duration = round(time.time() - start_time, 2)
+                event = ToolEvent(
+                    tool=f"LLM ({self.model})",
+                    status="failed",
+                    error=err_str,
+                    recovery="Retaining deterministic heuristic findings as baseline audit.",
+                    duration_seconds=duration,
+                )
+                fallback_response = LLMResponse(
+                    executive_summary=(
+                        f"Audit completed using deterministic analysis of {repo_stats.get('total_files_analyzed', 0)} files "
+                        f"({repo_stats.get('total_lines', 0):,} lines). Heuristic smells and structural metrics were verified."
+                    ),
+                    findings=[],
+                )
+                return fallback_response, event

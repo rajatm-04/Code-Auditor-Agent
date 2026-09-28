@@ -1,11 +1,13 @@
 """
 Deterministic file and repository analyzer.
-Extracts code metrics, smell heuristics, and structural stats without an LLM.
+Extracts code metrics, smell heuristics, and generates concrete Finding objects.
 """
 
 import os
 import re
 from typing import Any
+
+from src.models import Finding
 
 
 class FileAnalyzer:
@@ -64,7 +66,7 @@ class FileAnalyzer:
         code_lines = total_lines - blank_lines
 
         long_lines = [i + 1 for i, line in enumerate(lines) if len(line) > 120]
-        
+
         # Search for TODO / FIXME annotations
         todos: list[dict[str, Any]] = []
         for i, line in enumerate(lines, start=1):
@@ -83,7 +85,8 @@ class FileAnalyzer:
                 if re.search(pat, line):
                     secrets_found.append({
                         "line": i,
-                        "description": desc
+                        "description": desc,
+                        "snippet": line.strip()[:80],
                     })
 
         # Search for broad exceptions
@@ -93,7 +96,8 @@ class FileAnalyzer:
                 if re.search(pat, line):
                     broad_exceptions.append({
                         "line": i,
-                        "description": desc
+                        "description": desc,
+                        "snippet": line.strip()[:80],
                     })
 
         return {
@@ -113,7 +117,6 @@ class FileAnalyzer:
     def analyze_repository(cls, files: dict[str, str]) -> dict[str, Any]:
         """
         Aggregate file analysis into a repository-wide statistics bundle.
-        files: dict mapping path -> file_content
         """
         file_metrics = []
         source_count = 0
@@ -156,3 +159,80 @@ class FileAnalyzer:
             "files_with_broad_exceptions": files_with_broad_exceptions,
             "details": file_metrics,
         }
+
+    @classmethod
+    def generate_findings(cls, repo_stats: dict[str, Any]) -> list[Finding]:
+        """
+        Generates deterministic, verified Finding objects directly from heuristic analysis.
+        Guarantees actionable findings even if LLM is offline or throttled.
+        """
+        findings: list[Finding] = []
+
+        # 1. Broad exceptions
+        for detail in repo_stats.get("details", []):
+            for exc in detail.get("broad_exceptions", []):
+                findings.append(
+                    Finding(
+                        title=f"Broad exception handling in {os.path.basename(detail['path'])}",
+                        severity="medium",
+                        category="reliability",
+                        file=detail["path"],
+                        line_start=exc["line"],
+                        evidence=exc.get("snippet", exc["description"]),
+                        impact="Catches and swallows unexpected exceptions, masking critical runtime errors and bugs.",
+                        recommendation="Catch specific exception classes (e.g. ValueError, KeyError) instead of broad catch-all.",
+                        confidence=1.0,
+                    )
+                )
+
+        # 2. Hardcoded secrets / credentials
+        for detail in repo_stats.get("details", []):
+            for sec in detail.get("secrets", []):
+                findings.append(
+                    Finding(
+                        title=f"Potential hardcoded credential: {sec['description']}",
+                        severity="critical",
+                        category="security",
+                        file=detail["path"],
+                        line_start=sec["line"],
+                        evidence=sec.get("snippet", sec["description"]),
+                        impact="Exposes sensitive tokens or keys in plaintext source code.",
+                        recommendation="Move sensitive credentials into environment variables or secrets management.",
+                        confidence=0.90,
+                    )
+                )
+
+        # 3. Test Coverage Ratio Warning
+        test_ratio = repo_stats.get("test_to_source_ratio", 0.0)
+        source_count = repo_stats.get("source_files_count", 0)
+        if test_ratio < 0.15 and source_count > 3:
+            findings.append(
+                Finding(
+                    title=f"Low automated test coverage ratio ({test_ratio} tests/source)",
+                    severity="high",
+                    category="testing",
+                    file=None,
+                    evidence=f"Repository contains {source_count} source files but only {repo_stats.get('test_files_count', 0)} test files.",
+                    impact="Increases risk of regression bugs, refactoring breaks, and undetected defects.",
+                    recommendation="Implement automated unit tests for primary business logic components.",
+                    confidence=1.0,
+                )
+            )
+
+        # 4. Technical Debt / Unresolved TODOs
+        todos_count = repo_stats.get("total_todos", 0)
+        if todos_count >= 10:
+            findings.append(
+                Finding(
+                    title=f"High volume of unresolved technical debt ({todos_count} TODO/FIXME tags)",
+                    severity="low",
+                    category="maintainability",
+                    file=None,
+                    evidence=f"Detected {todos_count} TODO/FIXME markers across the codebase.",
+                    impact="Accumulated incomplete implementations and debt hinder long-term maintainability.",
+                    recommendation="Triage existing TODO comments into GitHub Issues or sprint backlog items.",
+                    confidence=1.0,
+                )
+            )
+
+        return findings

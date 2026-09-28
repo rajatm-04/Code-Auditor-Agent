@@ -65,17 +65,17 @@ class AuditController:
 
     def _render_plan(self):
         """Displays the execution plan table with real-time status badges in terminal."""
-        table = Table(title="📋 Autonomous Audit Execution Plan", border_style="cyan")
+        table = Table(title="[bold]Autonomous Audit Execution Plan[/bold]", border_style="cyan")
         table.add_column("Step", justify="center", style="bold")
         table.add_column("Description", style="white")
         table.add_column("Status", justify="center")
 
         status_styles = {
-            "pending": "[grey50]⏳ PENDING[/grey50]",
-            "running": "[yellow]🔄 RUNNING[/yellow]",
-            "done": "[green]✅ COMPLETED[/green]",
-            "failed": "[red]❌ FAILED[/red]",
-            "skipped": "[blue]⏭️ SKIPPED[/blue]",
+            "pending": "[grey50]PENDING[/grey50]",
+            "running": "[yellow]RUNNING[/yellow]",
+            "done": "[green]COMPLETED[/green]",
+            "failed": "[red]FAILED[/red]",
+            "skipped": "[blue]SKIPPED[/blue]",
         }
 
         for s in self.steps:
@@ -139,7 +139,7 @@ class AuditController:
                     duration_seconds=round(time.time() - start_t, 2),
                 )
             )
-            self.console.print(f"[bold red]❌ Error:[/bold red] {str(e)}")
+            self.console.print(f"[bold red]Error:[/bold red] {str(e)}")
             return None
 
         # =========================================================================
@@ -172,7 +172,7 @@ class AuditController:
                     duration_seconds=round(time.time() - start_t, 2),
                 )
             )
-            self.console.print(f"[bold red]❌ GitHub Access Error:[/bold red] {str(e)}")
+            self.console.print(f"[bold red]GitHub Access Error:[/bold red] {str(e)}")
             return None
 
         # =========================================================================
@@ -180,7 +180,6 @@ class AuditController:
         # =========================================================================
         self._set_step_status(3, "running")
         start_t = time.time()
-        # Filter for source files, prioritize smaller files first
         target_files = [
             f for f in all_tree_files if self.file_analyzer.is_supported_source(f)
         ][: self.github_tool.MAX_FILES]
@@ -215,15 +214,16 @@ class AuditController:
         self._set_step_status(4, "running")
         start_t = time.time()
         repo_stats = self.file_analyzer.analyze_repository(downloaded_files)
+        deterministic_findings = self.file_analyzer.generate_findings(repo_stats)
         self.tool_events.append(
             ToolEvent(
                 tool="Deterministic File Analyzer",
                 status="success",
                 result=(
                     f"Analyzed {repo_stats['total_files_analyzed']} files, "
-                    f"{repo_stats['total_lines']} lines. Found {repo_stats['total_todos']} TODOs, "
-                    f"{len(repo_stats['files_with_secrets'])} potential secrets, "
-                    f"{len(repo_stats['files_with_broad_exceptions'])} broad catches."
+                    f"{repo_stats['total_lines']:,} lines. Generated {len(deterministic_findings)} verified findings "
+                    f"({repo_stats['total_todos']} TODOs, {len(repo_stats['files_with_secrets'])} secrets, "
+                    f"{len(repo_stats['files_with_broad_exceptions'])} broad catches)."
                 ),
                 duration_seconds=round(time.time() - start_t, 2),
             )
@@ -234,7 +234,6 @@ class AuditController:
         # Step 5: External static analysis with graceful degradation
         # =========================================================================
         self._set_step_status(5, "running")
-        # Run ruff and bandit (against local dir or gracefully degrade)
         static_events = StaticAnalysisTool.run_all(".")
         self.tool_events.extend(static_events)
         for ev in static_events:
@@ -261,11 +260,11 @@ class AuditController:
             self._set_step_status(6, "done")
 
         # =========================================================================
-        # Step 7: Anti-hallucination finding validation
+        # Step 7: Anti-hallucination finding validation & merge
         # =========================================================================
         self._set_step_status(7, "running")
         start_t = time.time()
-        valid_findings, rejected_findings = FindingValidator.validate_findings(
+        valid_llm_findings, rejected_findings = FindingValidator.validate_findings(
             findings=llm_resp.findings,
             retrieved_files=list(downloaded_files.keys()),
         )
@@ -273,11 +272,24 @@ class AuditController:
             self.logger.warning(f"Filtered hallucinated finding: {rej['title']} -> {rej['reason']}")
             limitations.append(f"Discarded unverified finding '{rej['title']}' referencing non-existent file.")
 
+        # Merge: deterministic findings first (100% ground-truth), followed by valid LLM findings
+        seen_keys = set()
+        all_findings = []
+        for f in deterministic_findings + valid_llm_findings:
+            key = (f.file or "", f.line_start or 0, f.title.lower().strip())
+            if key not in seen_keys:
+                seen_keys.add(key)
+                all_findings.append(f)
+
         self.tool_events.append(
             ToolEvent(
-                tool="Finding Validator",
+                tool="Finding Validator & Merger",
                 status="success",
-                result=f"Validated {len(valid_findings)} findings ({len(rejected_findings)} hallucinated findings rejected).",
+                result=(
+                    f"Compiled {len(all_findings)} total findings: "
+                    f"{len(deterministic_findings)} deterministic baseline + "
+                    f"{len(valid_llm_findings)} AI findings ({len(rejected_findings)} hallucinated rejected)."
+                ),
                 duration_seconds=round(time.time() - start_t, 2),
             )
         )
@@ -301,7 +313,7 @@ class AuditController:
         audit_report = AuditReport(
             repository=summary_model,
             executive_summary=llm_resp.executive_summary,
-            findings=valid_findings,
+            findings=all_findings,
             tool_events=self.tool_events,
         )
 
@@ -314,7 +326,7 @@ class AuditController:
         self._render_plan()
         self.console.print(
             Panel.fit(
-                f"[bold green] Audit Complete![/bold green]\n"
+                f"[bold green]Audit Complete![/bold green]\n"
                 f"[white]Markdown Report:[/white] [cyan]{md_path}[/cyan]\n"
                 f"[white]JSON Report:[/white]     [cyan]{json_path}[/cyan]\n"
                 f"[white]Execution Log:[/white]   [cyan]{self.output_prefix}_execution.log[/cyan]",
